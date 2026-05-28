@@ -7,6 +7,24 @@ description: Discovers governed metadata assets (tables, dashboards, pipelines, 
 
 Discover metadata assets from an OpenMetadata / Collate instance through a local CLI that calls remote MCP tools via the Collate Data AI SDK. No local MCP server required.
 
+## Prerequisites
+
+Set two environment variables pointing at your Collate / OpenMetadata instance:
+
+```bash
+export AI_SDK_HOST=https://your-instance.collate.ai
+export AI_SDK_TOKEN_KEY=your-api-token
+```
+
+Or create a `.env` file in your project root:
+
+```env
+AI_SDK_HOST=https://your-instance.collate.ai
+AI_SDK_TOKEN_KEY=your-api-token
+```
+
+Find your API token in the Collate / OpenMetadata UI under **Settings → API Tokens**.
+
 ## Quick Start
 
 Run the CLI via npx (handles bootstrapping automatically):
