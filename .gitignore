@@ -5,12 +5,8 @@ __pycache__/
 .venv/
 node_modules/
 
-# Ignore all of .claude except our skill
+# Claude Code runtime files (installed by npx skills add or agent)
 .claude/*
-!.claude/skills/
-!.claude/commands/
-.claude/commands/*
-!.claude/commands/data-discovery.md
 
 # Local editor / tool config
 .codex
