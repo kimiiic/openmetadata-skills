@@ -1,0 +1,27 @@
+{
+  "name": "data-discovery-skill",
+  "version": "0.1.0",
+  "description": "Discover governed OpenMetadata / Collate metadata assets via npx.",
+  "license": "MIT",
+  "bin": {
+    "discover-data": "./bin/cli.js",
+    "disover-data": "./bin/cli.js"
+  },
+  "files": [
+    "bin/cli.js",
+    "src/",
+    "pyproject.toml",
+    "requirements.txt"
+  ],
+  "keywords": [
+    "openmetadata",
+    "collate",
+    "data-discovery",
+    "metadata",
+    "data-catalog"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_ORG/collate-skills"
+  }
+}

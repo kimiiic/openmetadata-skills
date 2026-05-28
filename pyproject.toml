@@ -1,0 +1,25 @@
+[project]
+name = "data-discovery-skill"
+version = "0.1.0"
+description = "CLI wrapper for discovering OpenMetadata / Collate metadata assets through the Collate Data AI SDK."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "data-ai-sdk",
+    "httpx",
+    "python-dotenv",
+]
+
+[project.scripts]
+discover-data = "data_discovery.cli:main"
+disover-data = "data_discovery.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = true
+
+[tool.setuptools.packages.find]
+where = ["src"]

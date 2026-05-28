@@ -1,0 +1,13 @@
+.venv/
+**/__pycache__/
+*.pyc
+*.egg-info/
+.claude/
+.agents/
+tests/
+docs/
+scripts/
+uv.lock
+skills-lock.json
+CONTEXT.md
+SKILL.md

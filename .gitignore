@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.venv/
+node_modules/
+
+# Ignore all of .claude except our skill
+.claude/*
+!.claude/skills/
+!.claude/commands/
+.claude/commands/*
+!.claude/commands/data-discovery.md
+
+# Local editor / tool config
+.codex
+
+# Third-party skills managed by skills-lock.json
+.agents/
+skills-lock.json
