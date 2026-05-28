@@ -5,7 +5,6 @@ from typing import Any
 
 from data_discovery.client import CollateAIClient, MetadataClient
 from data_discovery.formatter import (
-    _extract_ssot_table_fqn,
     format_answer,
     format_entity_type_prompt,
     merge_details,
@@ -14,8 +13,8 @@ from data_discovery.formatter import (
     to_jsonable,
 )
 from data_discovery.models import DiscoveryOptions, IntentSpec
-from data_discovery.router import build_tool_plan, build_tool_plan_from_intent, semantic_fallback_arguments
-from data_discovery.tools import call_planned_tool, call_tool, get_entity_details
+from data_discovery.router import get_router, semantic_fallback_arguments
+from data_discovery.tools import call_tool
 
 
 def discover_data(
@@ -38,10 +37,8 @@ def discover_data(
         threshold=threshold,
         debug=debug,
     )
-    if intent is not None:
-        plan = build_tool_plan_from_intent(intent, limit=options.limit)
-    else:
-        plan = build_tool_plan(question, options)
+    router = get_router(intent)
+    plan = router.build_plan(question=question, options=options, intent=intent)
     if plan.needs_entity_type:
         answer = format_entity_type_prompt(question, plan.cleaned_query)
         output = {
@@ -84,14 +81,8 @@ def discover_data(
     if plan.unsupported_constraints:
         notes.append("I could not apply the requested structured filter, so I searched semantically instead.")
 
-    response = _call_with_fallback(client, plan, notes, debug_info)
+    response = _execute_with_fallbacks(client, plan, notes, debug_info)
     results = normalize_results(response)
-
-    if plan.primary_tool == "search_metadata" and not results:
-        notes.append("No exact metadata matches were found; here are broader semantic matches.")
-        fallback_response = call_tool(client, "semantic_search", semantic_fallback_arguments(plan))
-        debug_info["no_result_fallback_response"] = fallback_response
-        results = normalize_results(fallback_response)
 
     enriched_details: list[dict[str, Any]] = []
     ssot_tables: list[dict[str, Any]] = []
@@ -101,7 +92,7 @@ def discover_data(
             fqn = result.get("fullyQualifiedName")
             if entity and fqn:
                 try:
-                    detail = get_entity_details(client, str(entity), str(fqn))
+                    detail = call_tool(client, "get_entity_details", {"entityType": str(entity), "fqn": str(fqn)})
                     enriched_details.append(detail)
                 except Exception as exc:
                     debug_info.setdefault("enrichment_errors", []).append(str(exc))
@@ -141,44 +132,62 @@ def discover_data(
     return to_jsonable(output)
 
 
-def _call_with_fallback(client: MetadataClient, plan: Any, notes: list[str], debug_info: dict[str, Any]) -> dict[str, Any]:
+def _execute_with_fallbacks(
+    client: MetadataClient, plan: Any, notes: list[str], debug_info: dict[str, Any]
+) -> dict[str, Any]:
+    """Try primary tool. On failure or empty results, try fallbacks. Return raw response."""
+
+    # Attempt 1: primary tool
     try:
-        response = call_planned_tool(client, plan)
-        if _is_error_response(response) and plan.primary_tool == "semantic_search" and plan.fallback_tool:
-            notes.append("Semantic search was unavailable, so I used metadata search instead.")
-            fallback_args = {
-                "query": plan.cleaned_query or "*",
-                "entityType": plan.entity_type,
-                "size": plan.arguments.get("size", 5),
-                "from": 0,
-                "includeDeleted": False,
-                "fields": "columns,owners,tags,domains,dataProducts",
-            }
-            if plan.query_filter:
-                fallback_args["queryFilter"] = json.dumps(plan.query_filter)
-            debug_info["fallback_payload"] = fallback_args
-            return call_tool(client, plan.fallback_tool, fallback_args)
-        return response
+        response = call_tool(client, plan.primary_tool, plan.arguments)
     except Exception as exc:
         debug_info["primary_error"] = str(exc)
         if not plan.fallback_tool:
             raise
         notes.append(f"{plan.primary_tool} failed, so I used {plan.fallback_tool} instead.")
-        if plan.fallback_tool == "semantic_search":
-            fallback_args = semantic_fallback_arguments(plan)
-        else:
-            fallback_args = {
-                "query": plan.cleaned_query or "*",
-                "entityType": plan.entity_type,
-                "size": plan.arguments.get("size", 5),
-                "from": 0,
-                "includeDeleted": False,
-                "fields": "columns,owners,tags,domains,dataProducts",
-            }
-            if plan.query_filter:
-                fallback_args["queryFilter"] = json.dumps(plan.query_filter)
-        debug_info["fallback_payload"] = fallback_args
-        return call_tool(client, plan.fallback_tool, fallback_args)
+        return _try_fallback_tool(client, plan, debug_info)
+
+    # Attempt 2: primary returned an error response
+    if _is_error_response(response) and plan.primary_tool == "semantic_search" and plan.fallback_tool:
+        notes.append("Semantic search was unavailable, so I used metadata search instead.")
+        debug_info["fallback_payload"] = _build_metadata_search_args(plan)
+        return call_tool(client, plan.fallback_tool, _build_metadata_search_args(plan))
+
+    # Attempt 3: metadata search returned zero results — try semantic
+    if plan.primary_tool == "search_metadata" and not normalize_results(response):
+        notes.append("No exact metadata matches were found; here are broader semantic matches.")
+        fallback_args = semantic_fallback_arguments(plan)
+        debug_info["no_result_fallback_args"] = fallback_args
+        return call_tool(client, "semantic_search", fallback_args)
+
+    return response
+
+
+def _try_fallback_tool(
+    client: MetadataClient, plan: Any, debug_info: dict[str, Any]
+) -> dict[str, Any]:
+    """Execute plan.fallback_tool with arguments appropriate for the tool."""
+    if plan.fallback_tool == "semantic_search":
+        args = semantic_fallback_arguments(plan)
+    else:
+        args = _build_metadata_search_args(plan)
+    debug_info["fallback_payload"] = args
+    return call_tool(client, plan.fallback_tool, args)
+
+
+def _build_metadata_search_args(plan: Any) -> dict[str, Any]:
+    """Build a standard search_metadata payload from a ToolPlan."""
+    args: dict[str, Any] = {
+        "query": plan.cleaned_query or "*",
+        "entityType": plan.entity_type,
+        "size": plan.arguments.get("size", 5),
+        "from": 0,
+        "includeDeleted": False,
+        "fields": "columns,owners,tags,domains,dataProducts",
+    }
+    if plan.query_filter:
+        args["queryFilter"] = json.dumps(plan.query_filter)
+    return args
 
 
 def _is_error_response(response: dict[str, Any]) -> bool:
@@ -200,7 +209,18 @@ def _resolve_ssot_tables(
     ssot_tables: list[dict[str, Any]] = []
 
     for detail in enriched_details:
-        table_fqn = _extract_ssot_table_fqn(detail)
+        references = detail.get("references")
+        ref_list: list[Any] = references if isinstance(references, list) else [references] if references else []
+        table_fqn: str | None = None
+        for ref in ref_list:
+            if isinstance(ref, dict):
+                name = (ref.get("name") or "").lower().replace(" ", "")
+                if name in ("ssot", "singlesourceoftruth"):
+                    endpoint = ref.get("endpoint", "")
+                    if "/table/" in endpoint:
+                        table_fqn = endpoint.rsplit("/table/", 1)[-1]
+                        break
+
         if not table_fqn or table_fqn in seen_fqns:
             continue
         seen_fqns.add(table_fqn)
@@ -209,7 +229,7 @@ def _resolve_ssot_tables(
         glossary_name = detail.get("displayName") or detail.get("name", "")
 
         try:
-            table_detail = get_entity_details(client, "table", table_fqn)
+            table_detail = call_tool(client, "get_entity_details", {"entityType": "table", "fqn": table_fqn})
         except Exception as exc:
             debug_info.setdefault("ssot_errors", []).append(str(exc))
             continue

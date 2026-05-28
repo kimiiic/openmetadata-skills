@@ -2,9 +2,25 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Protocol
 
-from data_discovery.models import Constraint, DiscoveryOptions, IntentSpec, ToolPlan
+from data_discovery.models import Constraint, DiscoveryOptions, ENTITY_TYPE_OPTIONS, ENTITY_TYPE_WORDS, IntentSpec, ToolPlan
+
+
+class Router(Protocol):
+    """Build a ToolPlan from whatever inputs the strategy needs.
+
+    One interface, N routing strategies. Add a new adapter instead of a new
+    if-branch at the call site.
+    """
+
+    def build_plan(
+        self,
+        *,
+        question: str = "",
+        options: DiscoveryOptions | None = None,
+        intent: IntentSpec | None = None,
+    ) -> ToolPlan: ...
 
 
 FQN_PATTERN = re.compile(r"\b[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+){2,}\b")
@@ -21,28 +37,6 @@ COMMAND_PREFIXES = (
     "can you",
     "could you",
 )
-
-ENTITY_TYPE_WORDS = {
-    "table": ("dataset", "datasets", "table", "tables", "data product", "data products", "asset", "assets"),
-    "dashboard": ("dashboard", "dashboards", "report", "reports", "visualisation", "visualisations", "visualization", "visualizations"),
-    "pipeline": ("pipeline", "pipelines", "dag", "dags", "airflow", "job", "jobs"),
-    "topic": ("kafka", "topic", "topics", "stream", "streams"),
-    "glossaryTerm": ("glossary", "business term", "business terms", "term", "terms"),
-    "metric": ("metric", "metrics", "kpi", "kpis", "measure", "measures"),
-}
-
-ENTITY_TYPE_OPTIONS = [
-    {"entityType": "table", "label": "Table", "emoji": "📊"},
-    {"entityType": "dashboard", "label": "Dashboard", "emoji": "📈"},
-    {"entityType": "pipeline", "label": "Pipeline", "emoji": "🔄"},
-    {"entityType": "topic", "label": "Topic / stream", "emoji": "📡"},
-    {"entityType": "metric", "label": "Metric", "emoji": "🎯"},
-    {"entityType": "glossaryTerm", "label": "Glossary term", "emoji": "📚"},
-    {"entityType": "tag", "label": "Tag / classification", "emoji": "🏷️"},
-    {"entityType": "mlmodel", "label": "ML model", "emoji": "🤖"},
-    {"entityType": "container", "label": "Storage container", "emoji": "🗄️"},
-    {"entityType": "dataProduct", "label": "Data product", "emoji": "📦"},
-]
 
 TECHNICAL_SERVICE_PREFIXES = ("starburst.", "snowflake.", "bigquery.", "postgres.", "mysql.")
 LOOKUP_FILLER_WORDS = {
@@ -183,7 +177,7 @@ def infer_entity_type(cleaned_query: str, override: str | None = None) -> tuple[
     return "table", False
 
 
-def build_tool_plan(question: str, options: DiscoveryOptions | None = None) -> ToolPlan:
+def _build_regex_plan(question: str, options: DiscoveryOptions | None = None) -> ToolPlan:
     options = options or DiscoveryOptions()
     limit = _clamp_int(options.limit, 1, 50)
     threshold = _clamp_float(options.threshold, 0.0, 1.0)
@@ -383,7 +377,7 @@ def semantic_fallback_arguments(plan: ToolPlan) -> dict[str, Any]:
     }
 
 
-def build_tool_plan_from_intent(intent: IntentSpec, limit: int = 10) -> ToolPlan:
+def _build_intent_plan(intent: IntentSpec, limit: int = 10) -> ToolPlan:
     """Build a ToolPlan from AI-extracted structured intent.
 
     This is the primary path when invoked through Claude Code: Claude extracts
@@ -691,3 +685,54 @@ def _clamp_int(value: int, minimum: int, maximum: int) -> int:
 
 def _clamp_float(value: float, minimum: float, maximum: float) -> float:
     return min(max(float(value), minimum), maximum)
+
+
+# ---------------------------------------------------------------------------
+# Router adapters
+# ---------------------------------------------------------------------------
+
+
+class RegexRouter:
+    """Regex-based routing: parses natural language for entity type + metadata clues."""
+
+    def build_plan(
+        self,
+        *,
+        question: str = "",
+        options: DiscoveryOptions | None = None,
+        intent: IntentSpec | None = None,  # noqa: ARG002 — unused by this strategy
+    ) -> ToolPlan:
+        return _build_regex_plan(question, options)
+
+
+class IntentRouter:
+    """AI-driven routing: deterministically maps an IntentSpec to a ToolPlan."""
+
+    def build_plan(
+        self,
+        *,
+        question: str = "",  # noqa: ARG002 — unused by this strategy
+        options: DiscoveryOptions | None = None,
+        intent: IntentSpec | None = None,
+    ) -> ToolPlan:
+        if intent is None:
+            return _build_regex_plan(question, options)
+        limit = options.limit if options else 10
+        return _build_intent_plan(intent, limit)
+
+
+def get_router(intent: IntentSpec | None = None) -> Router:
+    """Return the appropriate Router adapter for the given intent."""
+    if intent is not None:
+        return IntentRouter()
+    return RegexRouter()
+
+
+# Backward-compatible public API — kept for tests and direct callers.
+
+def build_tool_plan(question: str, options: DiscoveryOptions | None = None) -> ToolPlan:
+    return RegexRouter().build_plan(question=question, options=options)
+
+
+def build_tool_plan_from_intent(intent: IntentSpec, limit: int = 10) -> ToolPlan:
+    return IntentRouter().build_plan(options=DiscoveryOptions(limit=limit), intent=intent)

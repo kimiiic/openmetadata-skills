@@ -4,6 +4,49 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+@dataclass(frozen=True)
+class EntityTypeDef:
+    """Canonical definition for a supported OpenMetadata entity type."""
+
+    entity_type: str
+    label: str
+    emoji: str
+    prompt_label: str = ""  # User-facing category description for entity-type prompts
+    keywords: tuple[str, ...] = ()  # NLP trigger words; empty = only selectable via prompt
+
+    def __post_init__(self):
+        if not self.prompt_label:
+            object.__setattr__(self, "prompt_label", f"{self.label}s")
+
+
+ENTITY_TYPE_REGISTRY: list[EntityTypeDef] = [
+    EntityTypeDef("table", "Table", "📊", prompt_label="Tables / datasets", keywords=("dataset", "datasets", "table", "tables", "data product", "data products", "asset", "assets")),
+    EntityTypeDef("dashboard", "Dashboard", "📈", prompt_label="Dashboards / reports", keywords=("dashboard", "dashboards", "report", "reports", "visualisation", "visualisations", "visualization", "visualizations")),
+    EntityTypeDef("pipeline", "Pipeline", "🔄", prompt_label="Pipelines / jobs", keywords=("pipeline", "pipelines", "dag", "dags", "airflow", "job", "jobs")),
+    EntityTypeDef("topic", "Topic / stream", "📡", prompt_label="Topics / streams", keywords=("kafka", "topic", "topics", "stream", "streams")),
+    EntityTypeDef("metric", "Metric", "🎯", prompt_label="Metrics / KPIs", keywords=("metric", "metrics", "kpi", "kpis", "measure", "measures")),
+    EntityTypeDef("glossaryTerm", "Glossary term", "📚", prompt_label="Glossary terms", keywords=("glossary", "business term", "business terms", "term", "terms")),
+    EntityTypeDef("tag", "Tag / classification", "🏷️", prompt_label="Tags / classifications"),
+    EntityTypeDef("mlmodel", "ML model", "🤖", prompt_label="ML models"),
+    EntityTypeDef("container", "Storage container", "🗄️", prompt_label="Storage containers"),
+    EntityTypeDef("dataProduct", "Data product", "📦", prompt_label="Data products"),
+]
+
+# Derived views — single source of truth, different formats for different consumers.
+ENTITY_TYPE_WORDS: dict[str, tuple[str, ...]] = {
+    d.entity_type: d.keywords for d in ENTITY_TYPE_REGISTRY if d.keywords
+}
+
+ENTITY_TYPE_OPTIONS: list[dict[str, str]] = [
+    {"entityType": d.entity_type, "label": d.label, "emoji": d.emoji}
+    for d in ENTITY_TYPE_REGISTRY
+]
+
+ENTITY_TYPE_PROMPT_OPTIONS: list[tuple[str, str, str]] = [
+    (d.emoji, d.entity_type, d.prompt_label) for d in ENTITY_TYPE_REGISTRY
+]
+
+
 @dataclass
 class ToolPlan:
     primary_tool: str

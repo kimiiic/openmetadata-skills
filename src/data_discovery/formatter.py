@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any
 
+from data_discovery.models import ENTITY_TYPE_PROMPT_OPTIONS
+
 
 TIER_SOURCE_OF_TRUTH = {
     "Tier.Tier1": {
@@ -32,20 +34,6 @@ TIER_SOURCE_OF_TRUTH = {
         "summary": "Private or unused assets with no impact beyond individual users.",
     },
 }
-
-ENTITY_TYPE_PROMPT_OPTIONS = [
-    ("📊", "table", "Tables / datasets"),
-    ("📈", "dashboard", "Dashboards / reports"),
-    ("🔄", "pipeline", "Pipelines / jobs"),
-    ("📡", "topic", "Topics / streams"),
-    ("🎯", "metric", "Metrics / KPIs"),
-    ("📚", "glossaryTerm", "Glossary terms"),
-    ("🏷️", "tag", "Tags / classifications"),
-    ("🤖", "mlmodel", "ML models"),
-    ("🗄️", "container", "Storage containers"),
-    ("📦", "dataProduct", "Data products"),
-]
-
 
 def format_entity_type_prompt(question: str, cleaned_query: str) -> str:
     lines = [
@@ -429,20 +417,6 @@ def _why_relevant(result: dict[str, Any]) -> str:
     if result.get("description"):
         signals.append("description available")
     return "Matched by " + ", ".join(signals) + "." if signals else "Returned by the metadata catalogue search."
-
-
-def _extract_ssot_table_fqn(detail: dict[str, Any]) -> str | None:
-    """Parse the SSOT table FQN from a glossary term's references."""
-    references = _as_list(detail.get("references"))
-    for ref in references:
-        if isinstance(ref, dict):
-            name = (ref.get("name") or "").lower().replace(" ", "")
-            if name in ("ssot", "singlesourceoftruth"):
-                endpoint = ref.get("endpoint", "")
-                match = re.search(r"/table/(.+)$", endpoint)
-                if match:
-                    return match.group(1)
-    return None
 
 
 def _format_ssot_table(results: list[dict[str, Any]]) -> list[str]:
