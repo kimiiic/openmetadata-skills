@@ -5,11 +5,20 @@ __pycache__/
 .venv/
 node_modules/
 
-# Claude Code runtime files (installed by npx skills add or agent)
+# Claude Code runtime — only track our own skill
 .claude/*
+!.claude/skills/
+!.claude/skills/data-discovery/
+!.claude/commands/
+.claude/commands/*
+!.claude/commands/data-discovery.md
 
 # Local editor / tool config
 .codex
+
+# Exclude other skills installed via skills add (only ours is tracked)
+skills/*
+!skills/data-discovery/
 
 # Third-party skills managed by skills-lock.json
 .agents/
